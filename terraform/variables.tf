@@ -5,7 +5,7 @@ variable "region" {
 
 variable "web_ami_id" {
   type        = string
-  default     = "ami-0c9c942bd7bf113a2"   # Amazon Linux 2 (서울 리전 기본값)
+  default     = "ami-0aef7d1237f8a3805"   # Amazon Linux 2 (서울 리전 기본값)
   description = "ami-build.yml이 갱신할 AMI ID"
 }
 
