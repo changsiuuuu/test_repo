@@ -27,8 +27,6 @@ jobs:
 
       - name: Verify App
         run: |
-          # Terraform output에서 IP 가져오는 방식 (선택)
-          # 또는 ansible 인벤토리 IP에 직접 curl
           echo "✅ 배포 완료. 인벤토리에 등록된 EC2 IP:8000으로 접속 확인"
 
       - name: Send Telegram Notification
