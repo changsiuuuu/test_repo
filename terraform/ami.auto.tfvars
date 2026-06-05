@@ -1,1 +1,1 @@
-web_ami_id = "ami-004ff917d0dac1208"
+web_ami_id = "ami-0d770fd27724a0934"
