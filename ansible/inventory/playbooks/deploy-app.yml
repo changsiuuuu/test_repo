@@ -1,0 +1,40 @@
+---
+- name: Deploy FastAPI App (Test)
+  hosts: web
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Pull jj3061/fastapi-app image
+      shell: docker pull jj3061/fastapi-app:latest
+
+    - name: Stop existing container if running
+      shell: docker rm -f fastapi-app || true
+
+    - name: Run new container
+      shell: |
+        docker run -d \
+          --name fastapi-app \
+          -p 8000:8000 \
+          --restart unless-stopped \
+          jj3061/fastapi-app:latest
+
+    - name: Wait for app to start
+      wait_for:
+        host: localhost
+        port: 8000
+        delay: 3
+        timeout: 30
+
+    - name: Health check
+      uri:
+        url: http://localhost:8000/
+        status_code: 200
+      register: health
+      retries: 5
+      delay: 3
+      until: health.status == 200
+
+    - name: Show result
+      debug:
+        msg: "✅ FastAPI 앱 배포 완료. http://{{ inventory_hostname }}:8000"

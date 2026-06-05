@@ -1,0 +1,44 @@
+name: "App Deploy (Test)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "테스트 배포 사유"
+        required: false
+        default: "Pipeline test"
+
+concurrency:
+  group: app-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Ansible Playbook
+        working-directory: ansible
+        run: |
+          ansible-playbook -i inventory/hosts.ini playbooks/deploy-app.yml
+
+      - name: Verify App
+        run: |
+          # Terraform output에서 IP 가져오는 방식 (선택)
+          # 또는 ansible 인벤토리 IP에 직접 curl
+          echo "✅ 배포 완료. 인벤토리에 등록된 EC2 IP:8000으로 접속 확인"
+
+      - name: Send Telegram Notification
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🧪 [테스트 배포 ${{ job.status }}]
+            - 이미지: jj3061/fastapi-app:latest
+            - 실행자: ${{ github.actor }}
+            - 사유: ${{ github.event.inputs.reason }}
