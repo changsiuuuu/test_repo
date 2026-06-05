@@ -16,6 +16,6 @@ variable "instance_type" {
 
 variable "key_name" {
   type        = string
-  default     = ""        # 본인 키페어 이름 (SSH용)
+  default     = "test_repo"        # 본인 키페어 이름 (SSH용)
   description = "test_repo"
 }
