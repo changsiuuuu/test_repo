@@ -17,5 +17,5 @@ variable "instance_type" {
 variable "key_name" {
   type        = string
   default     = ""        # 본인 키페어 이름 (SSH용)
-  description = "EC2 SSH key pair 이름"
+  description = "test_repo"
 }

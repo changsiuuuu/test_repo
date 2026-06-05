@@ -1,3 +1,5 @@
+# 테스트용 03:12
+
 terraform {
   required_version = ">= 1.5.0"
   

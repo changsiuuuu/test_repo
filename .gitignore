@@ -50,3 +50,5 @@ Thumbs.db
 *.pem
 *.key
 .ccmall-key.pem.pub
+
+actions-runner
