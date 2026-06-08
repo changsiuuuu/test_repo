@@ -1,0 +1,79 @@
+name: "Scheduled Scaling (Up & Down)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      scale_up_capacity:
+        description: "스케일 업 목표 용량"
+        required: true
+        default: "3"
+      scale_up_time:
+        description: "스케일 업 시간 (KST, 형식: HH:MM)"
+        required: true
+        default: "16:15"
+      scale_down_capacity:
+        description: "스케일 다운 목표 용량"
+        required: true
+        default: "1"
+      scale_down_time:
+        description: "스케일 다운 시간 (KST, 형식: HH:MM)"
+        required: true
+        default: "16:20"
+
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+jobs:
+  scheduled_scale:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Convert Time to Cron
+        id: cron
+        run: |
+          # HH:MM → "MM HH * * *" cron 형식으로 변환
+          UP_TIME="${{ github.event.inputs.scale_up_time }}"
+          DOWN_TIME="${{ github.event.inputs.scale_down_time }}"
+          
+          UP_HOUR=$(echo $UP_TIME | cut -d: -f1)
+          UP_MIN=$(echo $UP_TIME | cut -d: -f2)
+          UP_CRON="$UP_MIN $UP_HOUR * * *"
+          
+          DOWN_HOUR=$(echo $DOWN_TIME | cut -d: -f1)
+          DOWN_MIN=$(echo $DOWN_TIME | cut -d: -f2)
+          DOWN_CRON="$DOWN_MIN $DOWN_HOUR * * *"
+          
+          echo "up_cron=$UP_CRON" >> $GITHUB_OUTPUT
+          echo "down_cron=$DOWN_CRON" >> $GITHUB_OUTPUT
+          
+          echo "📅 Scale Up:   $UP_CRON  (KST $UP_TIME → ${{ github.event.inputs.scale_up_capacity }}대)"
+          echo "📅 Scale Down: $DOWN_CRON  (KST $DOWN_TIME → ${{ github.event.inputs.scale_down_capacity }}대)"
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: terraform init
+
+      - name: Apply Scheduled Scaling
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="scale_up_capacity=${{ github.event.inputs.scale_up_capacity }}" \
+            -var="scale_up_cron=${{ steps.cron.outputs.up_cron }}" \
+            -var="scale_down_capacity=${{ github.event.inputs.scale_down_capacity }}" \
+            -var="scale_down_cron=${{ steps.cron.outputs.down_cron }}"
+      
+      - name: Show Result
+        run: |
+          echo "✅ 스케줄 등록 완료!"
+          echo ""
+          aws autoscaling describe-scheduled-actions \
+            --auto-scaling-group-name test-pipeline-asg \
+            --query 'ScheduledUpdateGroupActions[*].[ScheduledActionName,Recurrence,DesiredCapacity]' \
+            --output table

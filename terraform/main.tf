@@ -183,3 +183,31 @@ resource "aws_autoscaling_group" "web" {
     propagate_at_launch = true
   }
 }
+
+# Scale Up 스케줄
+resource "aws_autoscaling_schedule" "scale_up" {
+  count = var.scale_up_cron != "" ? 1 : 0
+  
+  scheduled_action_name  = "scheduled-scale-up"
+  autoscaling_group_name = aws_autoscaling_group.web.name
+  
+  desired_capacity = var.scale_up_capacity
+  min_size         = var.min_size
+  max_size         = var.max_size
+  recurrence       = var.scale_up_cron
+  time_zone        = "Asia/Seoul"
+}
+
+# Scale Down 스케줄
+resource "aws_autoscaling_schedule" "scale_down" {
+  count = var.scale_down_cron != "" ? 1 : 0
+  
+  scheduled_action_name  = "scheduled-scale-down"
+  autoscaling_group_name = aws_autoscaling_group.web.name
+  
+  desired_capacity = var.scale_down_capacity
+  min_size         = var.min_size
+  max_size         = var.max_size
+  recurrence       = var.scale_down_cron
+  time_zone        = "Asia/Seoul"
+}

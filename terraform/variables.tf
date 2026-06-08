@@ -35,3 +35,23 @@ variable "max_size" {
   type    = number
   default = 4
 }
+
+variable "scale_up_capacity" {
+  type    = number
+  default = 0
+}
+
+variable "scale_up_cron" {
+  type    = string
+  default = ""
+}
+
+variable "scale_down_capacity" {
+  type    = number
+  default = 0
+}
+
+variable "scale_down_cron" {
+  type    = string
+  default = ""
+}
