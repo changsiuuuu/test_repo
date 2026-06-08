@@ -1,0 +1,56 @@
+name: "Clear Scheduled Actions"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  clear:
+    runs-on: self-hosted
+
+    steps:
+      - name: Show Current Schedules
+        run: |
+          echo "=== 🔍 현재 등록된 스케줄 ==="
+          aws autoscaling describe-scheduled-actions \
+            --auto-scaling-group-name test-pipeline-asg \
+            --query 'ScheduledUpdateGroupActions[*].[ScheduledActionName,Recurrence,DesiredCapacity]' \
+            --output table
+
+      - name: Delete All Schedules
+        run: |
+          ACTIONS=$(aws autoscaling describe-scheduled-actions \
+            --auto-scaling-group-name test-pipeline-asg \
+            --query 'ScheduledUpdateGroupActions[*].ScheduledActionName' \
+            --output text)
+          
+          if [ -z "$ACTIONS" ]; then
+            echo "⏭ 삭제할 스케줄이 없습니다."
+            exit 0
+          fi
+          
+          for ACTION in $ACTIONS; do
+            aws autoscaling delete-scheduled-action \
+              --auto-scaling-group-name test-pipeline-asg \
+              --scheduled-action-name "$ACTION"
+            echo "✅ 삭제: $ACTION"
+          done
+          
+          echo ""
+          echo "🎉 모든 스케줄 삭제 완료!"
+
+      - name: Verify
+        run: |
+          echo "=== ✅ 삭제 후 상태 ==="
+          REMAINING=$(aws autoscaling describe-scheduled-actions \
+            --auto-scaling-group-name test-pipeline-asg \
+            --query 'ScheduledUpdateGroupActions' \
+            --output text)
+          
+          if [ -z "$REMAINING" ]; then
+            echo "스케줄이 모두 삭제되었습니다."
+          else
+            echo "남아있는 스케줄:"
+            aws autoscaling describe-scheduled-actions \
+              --auto-scaling-group-name test-pipeline-asg \
+              --output table
+          fi
