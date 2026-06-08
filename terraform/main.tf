@@ -136,6 +136,7 @@ resource "aws_launch_template" "web" {
   user_data = base64encode(<<-EOF
     #!/bin/bash
     systemctl start docker
+    docker pull jj3061/fastapi-app:latest
     docker run -d \
       --name fastapi-app \
       --restart always \
