@@ -19,6 +19,24 @@ on:
         description: "스케일 다운 시간 (KST, 형식: HH:MM)"
         required: true
         default: "16:20"
+      days_of_week:
+        description: "실행 요일"
+        required: true
+        type: choice
+        options:
+          - "매일 (* * *)"
+          - "평일 (월-금)"
+          - "주말 (토-일)"
+          - "월요일"
+          - "화요일"
+          - "수요일"
+          - "목요일"
+          - "금요일"
+          - "토요일"
+          - "일요일"
+          - "월/수/금"
+          - "화/목"
+        default: "매일 (* * *)"
 
 concurrency:
   group: terraform-state
@@ -35,26 +53,45 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Convert Time to Cron
+      - name: Convert Inputs to Cron
         id: cron
         run: |
-          # HH:MM → "MM HH * * *" cron 형식으로 변환
+          # 요일 변환
+          # Cron 요일: 0=일, 1=월, 2=화, 3=수, 4=목, 5=금, 6=토
+          case "${{ github.event.inputs.days_of_week }}" in
+            "매일 (* * *)")    DAYS="*" ;;
+            "평일 (월-금)")    DAYS="1-5" ;;
+            "주말 (토-일)")    DAYS="0,6" ;;
+            "월요일")          DAYS="1" ;;
+            "화요일")          DAYS="2" ;;
+            "수요일")          DAYS="3" ;;
+            "목요일")          DAYS="4" ;;
+            "금요일")          DAYS="5" ;;
+            "토요일")          DAYS="6" ;;
+            "일요일")          DAYS="0" ;;
+            "월/수/금")        DAYS="1,3,5" ;;
+            "화/목")           DAYS="2,4" ;;
+            *)                 DAYS="*" ;;
+          esac
+          
+          # 시간 변환
           UP_TIME="${{ github.event.inputs.scale_up_time }}"
           DOWN_TIME="${{ github.event.inputs.scale_down_time }}"
           
           UP_HOUR=$(echo $UP_TIME | cut -d: -f1)
           UP_MIN=$(echo $UP_TIME | cut -d: -f2)
-          UP_CRON="$UP_MIN $UP_HOUR * * *"
+          UP_CRON="$UP_MIN $UP_HOUR * * $DAYS"
           
           DOWN_HOUR=$(echo $DOWN_TIME | cut -d: -f1)
           DOWN_MIN=$(echo $DOWN_TIME | cut -d: -f2)
-          DOWN_CRON="$DOWN_MIN $DOWN_HOUR * * *"
+          DOWN_CRON="$DOWN_MIN $DOWN_HOUR * * $DAYS"
           
           echo "up_cron=$UP_CRON" >> $GITHUB_OUTPUT
           echo "down_cron=$DOWN_CRON" >> $GITHUB_OUTPUT
           
-          echo "📅 Scale Up:   $UP_CRON  (KST $UP_TIME → ${{ github.event.inputs.scale_up_capacity }}대)"
-          echo "📅 Scale Down: $DOWN_CRON  (KST $DOWN_TIME → ${{ github.event.inputs.scale_down_capacity }}대)"
+          echo "📅 요일: ${{ github.event.inputs.days_of_week }} (cron: $DAYS)"
+          echo "📈 Scale Up:   $UP_CRON  → ${{ github.event.inputs.scale_up_capacity }}대"
+          echo "📉 Scale Down: $DOWN_CRON  → ${{ github.event.inputs.scale_down_capacity }}대"
 
       - name: Initialize Terraform
         working-directory: terraform
@@ -73,7 +110,23 @@ jobs:
         run: |
           echo "✅ 스케줄 등록 완료!"
           echo ""
+          echo "=== 등록된 스케줄 ==="
           aws autoscaling describe-scheduled-actions \
             --auto-scaling-group-name test-pipeline-asg \
-            --query 'ScheduledUpdateGroupActions[*].[ScheduledActionName,Recurrence,DesiredCapacity]' \
+            --query 'ScheduledUpdateGroupActions[*].[ScheduledActionName,Recurrence,DesiredCapacity,TimeZone]' \
             --output table
+
+      - name: Send Notification
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            📅 [스케줄 등록 완료]
+            요일: ${{ github.event.inputs.days_of_week }}
+            
+            📈 Scale Up: ${{ github.event.inputs.scale_up_time }} → ${{ github.event.inputs.scale_up_capacity }}대
+            📉 Scale Down: ${{ github.event.inputs.scale_down_time }} → ${{ github.event.inputs.scale_down_capacity }}대
+            
+            실행자: ${{ github.actor }}
