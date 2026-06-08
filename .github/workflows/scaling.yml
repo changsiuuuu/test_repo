@@ -1,0 +1,35 @@
+name: "Scaling"
+
+on:
+  workflow_dispatch:
+    inputs:
+      desired_capacity:
+        description: "Target capacity size for the Auto Scaling Group (Scale-In/Out)"
+        required: true
+        default: "3"
+
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+jobs:
+  scale:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform Environment
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Initialize Terraform
+        working-directory: terraform        # ← 수정
+        run: terraform init
+
+      - name: Apply Scaling Changes
+        working-directory: terraform        # ← 수정
+        run: |
+          terraform apply \
+            -auto-approve \
+            -var="desired_capacity=${{ github.event.inputs.desired_capacity }}"

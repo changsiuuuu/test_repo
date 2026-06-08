@@ -1,4 +1,6 @@
-# 기본 VPC 사용 (간편하게)
+# ============================================
+# Network (기본 VPC 사용)
+# ============================================
 data "aws_vpc" "default" {
   default = true
 }
@@ -10,29 +12,16 @@ data "aws_subnets" "default" {
   }
 }
 
-# Security Group
-resource "aws_security_group" "test_sg" {
-  name        = "test-pipeline-sg"
-  description = "Test pipeline security group"
+# ============================================
+# Security Groups
+# ============================================
+
+# ALB용 SG
+resource "aws_security_group" "alb_sg" {
+  name        = "test-pipeline-alb-sg"
+  description = "ALB security group"
   vpc_id      = data.aws_vpc.default.id
 
-  # SSH
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # FastAPI (8000)
-  ingress {
-    from_port   = 8000
-    to_port     = 8000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # HTTP
   ingress {
     from_port   = 80
     to_port     = 80
@@ -48,32 +37,148 @@ resource "aws_security_group" "test_sg" {
   }
 
   tags = {
+    Name = "test-pipeline-alb-sg"
+  }
+}
+
+# EC2용 SG
+resource "aws_security_group" "test_sg" {
+  name        = "test-pipeline-sg"
+  description = "Test pipeline security group"
+  vpc_id      = data.aws_vpc.default.id
+
+  # SSH
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # FastAPI: ALB에서만 접근
+  ingress {
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
     Name = "test-pipeline-sg"
   }
 }
 
-# EC2 인스턴스 1대 (테스트용)
-resource "aws_instance" "test_web" {
-  ami                    = var.web_ami_id
-  instance_type          = var.instance_type
-  subnet_id              = data.aws_subnets.default.ids[0]
-  vpc_security_group_ids = [aws_security_group.test_sg.id]
-  key_name               = var.key_name != "" ? var.key_name : null
-  
-  associate_public_ip_address = true
-
-  # Docker 자동 설치 + 권한 설정
-  user_data = <<-EOF
-    #!/bin/bash
-    yum update -y
-    yum install -y docker
-    systemctl enable docker
-    systemctl start docker
-    usermod -aG docker ec2-user
-  EOF
+# ============================================
+# Application Load Balancer
+# ============================================
+resource "aws_lb" "web" {
+  name               = "test-pipeline-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = data.aws_subnets.default.ids
 
   tags = {
-    Name = "test-web"
-    Role = "web"
+    Name = "test-pipeline-alb"
+  }
+}
+
+resource "aws_lb_target_group" "web" {
+  name     = "test-pipeline-tg"
+  port     = 8000
+  protocol = "HTTP"
+  vpc_id   = data.aws_vpc.default.id
+
+  health_check {
+    path                = "/"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    matcher             = "200"
+  }
+
+  tags = {
+    Name = "test-pipeline-tg"
+  }
+}
+
+resource "aws_lb_listener" "web" {
+  load_balancer_arn = aws_lb.web.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web.arn
+  }
+}
+
+# ============================================
+# Launch Template
+# ============================================
+resource "aws_launch_template" "web" {
+  name_prefix   = "test-web-lt-"
+  image_id      = var.web_ami_id
+  instance_type = var.instance_type
+  key_name      = var.key_name != "" ? var.key_name : null
+
+  vpc_security_group_ids = [aws_security_group.test_sg.id]
+
+  # AMI에 이미 Docker 설치되어 있으니 docker run만 실행
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    systemctl start docker
+    docker run -d \
+      --name fastapi-app \
+      --restart always \
+      -p 8000:8000 \
+      jj3061/fastapi-app:latest
+  EOF
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "test-web-asg"
+      Role = "web"
+    }
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ============================================
+# Auto Scaling Group
+# ============================================
+resource "aws_autoscaling_group" "web" {
+  name                = "test-pipeline-asg"
+  desired_capacity    = var.desired_capacity
+  min_size            = var.min_size
+  max_size            = var.max_size
+  
+  vpc_zone_identifier = data.aws_subnets.default.ids
+  target_group_arns   = [aws_lb_target_group.web.arn]
+  health_check_type   = "ELB"
+  health_check_grace_period = 120
+
+  launch_template {
+    id      = aws_launch_template.web.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "test-web-asg"
+    propagate_at_launch = true
   }
 }

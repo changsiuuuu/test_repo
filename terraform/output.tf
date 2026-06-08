@@ -1,15 +1,12 @@
-output "instance_id" {
-  value = aws_instance.test_web.id
+output "alb_dns_name" {
+  value       = aws_lb.web.dns_name
+  description = "Access the app via this DNS"
 }
 
-output "public_ip" {
-  value = aws_instance.test_web.public_ip
+output "asg_name" {
+  value = aws_autoscaling_group.web.name
 }
 
-output "public_dns" {
-  value = aws_instance.test_web.public_dns
-}
-
-output "app_url" {
-  value = "http://${aws_instance.test_web.public_ip}:8000"
+output "current_capacity" {
+  value = aws_autoscaling_group.web.desired_capacity
 }
