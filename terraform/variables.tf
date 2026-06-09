@@ -63,13 +63,34 @@ variable "scale_down_cron" {
 }
 
 variable "app_image_tag" {
-  type    = string
-  default = "latest"
+  type        = string
+  default     = "latest"
   description = "Docker 이미지 태그 (rollback.yml 등에서 사용)"
 }
 
 variable "db_image_tag" {
-  type    = string
-  default = "postgres:15"
+  type        = string
+  default     = "postgres:15"
   description = "DB Docker 이미지 태그"
+}
+
+# ✨ Tailscale 연동 변수
+variable "tailnet_name" {
+  type        = string
+  description = "Tailnet 이름 (예: user@gmail.com)"
+  default     = ""
+}
+
+variable "tailscale_api_key" {
+  type        = string
+  description = "Tailscale API Key (라우팅 승인용)"
+  sensitive   = true
+  default     = ""
+}
+
+variable "tailscale_auth_key" {
+  type        = string
+  description = "Tailscale Auth Key (VPN 조인용)"
+  sensitive   = true
+  default     = ""
 }

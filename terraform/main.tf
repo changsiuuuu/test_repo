@@ -185,14 +185,37 @@ resource "aws_instance" "db" {
   ami           = var.db_ami_id
   instance_type = var.instance_type
   key_name      = var.key_name != "" ? var.key_name : null
-  
+
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.db_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
+    yum install -y jq docker
     systemctl start docker
+
+    # 1. Tailscale 설치 및 설정
+    curl -fsSL https://tailscale.com/install.sh | sh
+    
+    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" -s)
+    MAC=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/mac)
+    VPC_CIDR=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/$MAC/vpc-ipv4-cidr-block)
+
+    tailscale up --authkey=${var.tailscale_auth_key} --advertise-routes=$VPC_CIDR --hostname=aws-db-node
+    
+    sleep 5
+    DEVICE_ID=$(tailscale status --json | jq -r '.Self.ID')
+    curl -s -X POST "https://api.tailscale.com/api/v2/device/$DEVICE_ID/routes" \
+      -u "${var.tailscale_api_key}:" \
+      -H "Content-Type: application/json" \
+      -d "{\"routes\": [\"$VPC_CIDR\"]}"
+
+    # 2. 모니터링 컨테이너 실행
+    docker run -d --name node-exporter -p 9100:9100 --restart always prom/node-exporter
+    docker run -d --name cadvisor -p 8080:8080 -v /:/rootfs:ro -v /var/run:/var/run:rw -v /sys:/sys:ro -v /var/lib/docker/:/var/lib/docker:ro --restart always gcr.io/cadvisor/cadvisor
+
+    # 3. DB 컨테이너 실행
     docker pull ${var.db_image_tag}
     docker run -d \
       --name my-db \
@@ -230,6 +253,12 @@ resource "aws_launch_template" "web" {
   user_data = base64encode(<<-EOF
     #!/bin/bash
     systemctl start docker
+
+    # 1. 모니터링 컨테이너 실행 (Node Exporter & cAdvisor)
+    docker run -d --name node-exporter -p 9100:9100 --restart always prom/node-exporter
+    docker run -d --name cadvisor -p 8080:8080 -v /:/rootfs:ro -v /var/run:/var/run:rw -v /sys:/sys:ro -v /var/lib/docker/:/var/lib/docker:ro --restart always gcr.io/cadvisor/cadvisor
+
+    # 2. Web앱 컨테이너 실행
     docker pull jj3061/fastapi-app:${var.app_image_tag}
     docker run -d \
       --name fastapi-app \
@@ -261,14 +290,14 @@ resource "aws_launch_template" "web" {
 # Auto Scaling Group
 # ============================================
 resource "aws_autoscaling_group" "web" {
-  name                = "test-pipeline-asg"
-  desired_capacity    = var.desired_capacity
-  min_size            = var.min_size
-  max_size            = var.max_size
-  
-  vpc_zone_identifier = data.aws_subnets.default.ids
-  target_group_arns   = [aws_lb_target_group.web.arn]
-  health_check_type   = "ELB"
+  name             = "test-pipeline-asg"
+  desired_capacity = var.desired_capacity
+  min_size         = var.min_size
+  max_size         = var.max_size
+
+  vpc_zone_identifier       = data.aws_subnets.default.ids
+  target_group_arns         = [aws_lb_target_group.web.arn]
+  health_check_type         = "ELB"
   health_check_grace_period = 120
 
   launch_template {
@@ -286,10 +315,10 @@ resource "aws_autoscaling_group" "web" {
 # Scale Up 스케줄
 resource "aws_autoscaling_schedule" "scale_up" {
   count = var.scale_up_cron != "" ? 1 : 0
-  
+
   scheduled_action_name  = "scheduled-scale-up"
   autoscaling_group_name = aws_autoscaling_group.web.name
-  
+
   desired_capacity = var.scale_up_capacity
   min_size         = var.min_size
   max_size         = var.max_size
@@ -300,10 +329,10 @@ resource "aws_autoscaling_schedule" "scale_up" {
 # Scale Down 스케줄
 resource "aws_autoscaling_schedule" "scale_down" {
   count = var.scale_down_cron != "" ? 1 : 0
-  
+
   scheduled_action_name  = "scheduled-scale-down"
   autoscaling_group_name = aws_autoscaling_group.web.name
-  
+
   desired_capacity = var.scale_down_capacity
   min_size         = var.min_size
   max_size         = var.max_size
