@@ -1,0 +1,67 @@
+name: "Restart DB"
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "재시작 사유"
+        required: false
+        default: "FastAPI triggered restart"
+
+concurrency:
+  group: db-restart
+  cancel-in-progress: false
+
+jobs:
+  restart_db:
+    runs-on: self-hosted # self-hosted 대신 GitHub 런너 사용 가능 (AWS CLI 내장)
+    # 만약 self-hosted 런너에 AWS 권한이 이미 있다면 self-hosted 유지
+    # permissions 추가하여 GitHub OIDC를 통해 AWS 인증을 할 수도 있으나 
+    # 현재 설정에 AWS 액세스 키가 환경변수로 있거나 self-hosted의 IAM Role을 쓴다고 가정
+
+    steps:
+      - name: Log Restart Context
+        run: |
+          echo "🔄 DB 재시작 트리거됨"
+          echo "  사유: ${{ github.event.inputs.reason }}"
+          echo "  실행자: ${{ github.actor }}"
+
+      # AWS 인증 단계 (기존 인프라 배포와 동일한 인증 방식 적용 필요)
+      # self-hosted 런너가 이미 IAM Role을 가지고 있다면 이 단계는 생략 가능
+      # - name: Configure AWS Credentials
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: ap-northeast-2
+
+      - name: Restart DB via AWS SSM
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=tag:Purpose,Values=db" \
+            --parameters '{"commands":["docker restart my-db"]}' \
+            --comment "Restart DB container: ${{ github.event.inputs.reason }}" \
+            --query "Command.CommandId" \
+            --output text)
+            
+          echo "SSM Command ID: $COMMAND_ID"
+          
+          # 명령이 완료될 때까지 대기
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id $(aws ec2 describe-instances --filters "Name=tag:Purpose,Values=db" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text)
+            
+          echo "✅ DB 컨테이너 재시작 완료"
+
+      - name: Send Notification
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🔄 [DB 재시작 결과]
+            - 결과: ${{ job.status }}
+            - 사유: ${{ github.event.inputs.reason }}
+            - 실행자: ${{ github.actor }}

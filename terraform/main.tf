@@ -13,6 +13,37 @@ data "aws_subnets" "default" {
 }
 
 # ============================================
+# IAM Role for SSM
+# ============================================
+resource "aws_iam_role" "ssm_role" {
+  name = "test-pipeline-ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm_profile" {
+  name = "test-pipeline-ssm-profile"
+  role = aws_iam_role.ssm_role.name
+}
+
+
+# ============================================
 # Security Groups
 # ============================================
 
@@ -41,7 +72,7 @@ resource "aws_security_group" "alb_sg" {
   }
 }
 
-# EC2용 SG
+# EC2 Web용 SG
 resource "aws_security_group" "test_sg" {
   name        = "test-pipeline-sg"
   description = "Test pipeline security group"
@@ -72,6 +103,32 @@ resource "aws_security_group" "test_sg" {
 
   tags = {
     Name = "test-pipeline-sg"
+  }
+}
+
+# EC2 DB용 SG
+resource "aws_security_group" "db_sg" {
+  name        = "test-pipeline-db-sg"
+  description = "Test pipeline DB security group"
+  vpc_id      = data.aws_vpc.default.id
+
+  # PostgreSQL: Web SG에서만 접근 허용
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.test_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "test-pipeline-db-sg"
   }
 }
 
@@ -122,7 +179,40 @@ resource "aws_lb_listener" "web" {
 }
 
 # ============================================
-# Launch Template
+# DB EC2 Instance
+# ============================================
+resource "aws_instance" "db" {
+  ami           = var.db_ami_id
+  instance_type = var.instance_type
+  key_name      = var.key_name != "" ? var.key_name : null
+  
+  subnet_id              = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.db_sg.id]
+  iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name
+
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    systemctl start docker
+    docker pull ${var.db_image_tag}
+    docker run -d \
+      --name my-db \
+      --restart always \
+      -e POSTGRES_PASSWORD=secret \
+      -e POSTGRES_USER=myuser \
+      -e POSTGRES_DB=mydb \
+      -p 5432:5432 \
+      ${var.db_image_tag}
+  EOF
+  )
+
+  tags = {
+    Name    = "test-pipeline-db"
+    Purpose = "db"
+  }
+}
+
+# ============================================
+# Launch Template (Web)
 # ============================================
 resource "aws_launch_template" "web" {
   name_prefix   = "test-web-lt-"
@@ -131,8 +221,12 @@ resource "aws_launch_template" "web" {
   key_name      = var.key_name != "" ? var.key_name : null
 
   vpc_security_group_ids = [aws_security_group.test_sg.id]
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ssm_profile.name
+  }
 
   # AMI에 이미 Docker 설치되어 있으니 docker run만 실행
+  # Web앱이 DB 주소를 알게 하기 위해 DB 내부 IP를 환경변수로 전달할 수 있습니다.
   user_data = base64encode(<<-EOF
     #!/bin/bash
     systemctl start docker
@@ -141,6 +235,11 @@ resource "aws_launch_template" "web" {
       --name fastapi-app \
       --restart always \
       -p 8000:8000 \
+      -e DB_HOST=${aws_instance.db.private_ip} \
+      -e DB_PORT=5432 \
+      -e DB_USER=myuser \
+      -e DB_PASSWORD=secret \
+      -e DB_NAME=mydb \
       jj3061/fastapi-app:${var.app_image_tag}
   EOF
   )
@@ -148,8 +247,8 @@ resource "aws_launch_template" "web" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "test-web-asg"
-      Role = "web"
+      Name    = "test-web-asg"
+      Purpose = "web"
     }
   }
 

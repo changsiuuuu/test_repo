@@ -9,6 +9,12 @@ variable "web_ami_id" {
   description = "ami-build.yml이 갱신할 AMI ID"
 }
 
+variable "db_ami_id" {
+  type        = string
+  default     = "ami-0aef7d1237f8a3805" # Default to same base AMI for now
+  description = "DB용 AMI ID"
+}
+
 variable "instance_type" {
   type    = string
   default = "t3.micro"
@@ -60,4 +66,10 @@ variable "app_image_tag" {
   type    = string
   default = "latest"
   description = "Docker 이미지 태그 (rollback.yml 등에서 사용)"
+}
+
+variable "db_image_tag" {
+  type    = string
+  default = "postgres:15"
+  description = "DB Docker 이미지 태그"
 }
