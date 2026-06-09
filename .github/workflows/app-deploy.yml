@@ -3,6 +3,10 @@ name: "App Deploy"
 on:
   workflow_dispatch:
     inputs:
+      docker_tag:
+        description: "배포 또는 롤백할 Docker 이미지 태그 (예: v1.0.0, latest)"
+        required: true
+        default: "latest"
       reason:
         description: "배포 사유"
         required: false
@@ -12,6 +16,50 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update Docker Tag in Terraform
+        run: |
+          TAG="${{ github.event.inputs.docker_tag }}"
+          FILE="terraform/app.auto.tfvars"
+          
+          mkdir -p terraform
+          touch $FILE
+          
+          # 기존 app_image_tag 라인 삭제 후 새로 추가
+          sed -i "/^app_image_tag/d" $FILE
+          echo "app_image_tag = \"$TAG\"" >> $FILE
+          
+          echo "📝 업데이트된 tfvars:"
+          cat $FILE
+
+      - name: Commit & Push Changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add terraform/app.auto.tfvars
+          
+          if git diff --cached --quiet; then
+            echo "변경사항 없음."
+          else
+            git commit -m "chore: deploy docker image ${{ github.event.inputs.docker_tag }} - ${{ github.event.inputs.reason }} [skip ci]"
+            git push
+            echo "✅ 태그 업데이트 완료"
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init & Apply
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
       - name: Start Instance Refresh
         run: |
           REFRESH_ID=$(aws autoscaling start-instance-refresh \
@@ -21,7 +69,7 @@ jobs:
           
           echo "REFRESH_ID=$REFRESH_ID" >> $GITHUB_ENV
           echo "🚀 배포 시작: $REFRESH_ID"
-      
+
       - name: Wait for Completion
         timeout-minutes: 15
         run: |
@@ -45,7 +93,7 @@ jobs:
             
             sleep 20
           done
-      
+
       - name: Verify Health
         run: |
           ALB_DNS=$(aws elbv2 describe-load-balancers \
@@ -55,3 +103,17 @@ jobs:
           echo "ALB: http://$ALB_DNS"
           curl -f http://$ALB_DNS/ || exit 1
           echo "✅ 앱 정상 동작 확인!"
+
+      - name: Send Notification
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🚀 [배포/롤백 결과]
+            - 결과: ${{ job.status }}
+            - 태그: ${{ github.event.inputs.docker_tag }}
+            - 사유: ${{ github.event.inputs.reason }}
+            - 실행자: ${{ github.actor }}
+            GitHub Actions 로그를 확인하십시오.

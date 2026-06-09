@@ -55,3 +55,9 @@ variable "scale_down_cron" {
   type    = string
   default = ""
 }
+
+variable "app_image_tag" {
+  type    = string
+  default = "latest"
+  description = "Docker 이미지 태그 (rollback.yml 등에서 사용)"
+}
