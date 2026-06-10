@@ -108,7 +108,7 @@ jobs:
       
       - name: Show Result
         run: |
-          echo "✅ 스케줄 등록 완료!"
+          echo "스케줄 등록 완료"
           echo ""
           echo "=== 등록된 스케줄 ==="
           aws autoscaling describe-scheduled-actions \

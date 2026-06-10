@@ -27,13 +27,13 @@ concurrency:
 jobs:
   build_ami:
     runs-on: self-hosted
-    timeout-minutes: 30   # ✨ 추가: 무한 대기 방지
+    timeout-minutes: 30   # 무한 대기 방지
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # ✨ 추가: git push 위해 전체 히스토리 필요
+          fetch-depth: 0   # git push 위해 전체 히스토리 필요
 
       - name: Setup Packer
         uses: hashicorp/setup-packer@main
@@ -66,7 +66,7 @@ jobs:
             -machine-readable \
             . | tee packer-output.log
 
-      # ✨ 추가: 디버깅용 로그 출력
+      # 디버깅용 로그 출력
       - name: Debug Packer Output
         if: always()
         working-directory: packer
@@ -86,7 +86,7 @@ jobs:
             exit 1
           fi
           echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
-          echo "✅ 생성된 AMI ID: $AMI_ID"
+          echo "생성된 AMI ID: $AMI_ID"
 
       - name: Update Terraform tfvars
         run: |
@@ -100,7 +100,7 @@ jobs:
           sed -i "/^${PURPOSE}_ami_id/d" $FILE
           echo "${PURPOSE}_ami_id = \"${AMI_ID}\"" >> $FILE
           
-          echo "📝 업데이트된 tfvars:"
+          echo "업데이트된 tfvars:"
           cat $FILE
 
       - name: Commit AMI ID
@@ -113,13 +113,10 @@ jobs:
           if git diff --cached --quiet; then
             echo "변경사항 없음. 커밋 스킵."
           else
-            # ✨ 수정: [skip ci] 추가하여 무한 루프 방지
             git commit -m "ci: update ${{ steps.vars.outputs.purpose }} AMI ID to ${{ steps.ami.outputs.ami_id }} [skip ci]"
-            
-            # ✨ 추가: pull --rebase로 충돌 방지
             git pull --rebase origin ${{ github.ref_name }} || true
             git push
-            echo "✅ AMI ID 커밋 완료"
+            echo "AMI ID 커밋 완료"
           fi
 
       - name: Send Success Notification
@@ -129,7 +126,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            📦 [AMI 빌드 완료]
+            [AMI 빌드 완료]
             - 용도: ${{ steps.vars.outputs.purpose }}
             - AMI ID: ${{ steps.ami.outputs.ami_id }}
             - 트리거: ${{ github.actor }}
@@ -144,7 +141,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ❌ [AMI 빌드 실패]
+            [AMI 빌드 실패]
             - 용도: ${{ github.event.inputs.ami_purpose || 'web' }}
             - 실행자: ${{ github.actor }}
             GitHub Actions 로그를 확인하십시오.

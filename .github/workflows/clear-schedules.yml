@@ -32,15 +32,15 @@ jobs:
             aws autoscaling delete-scheduled-action \
               --auto-scaling-group-name test-pipeline-asg \
               --scheduled-action-name "$ACTION"
-            echo "✅ 삭제: $ACTION"
+            echo "삭제: $ACTION"
           done
           
           echo ""
-          echo "🎉 모든 스케줄 삭제 완료!"
+          echo "🎉 모든 스케줄 삭제 완료"
 
       - name: Verify
         run: |
-          echo "=== ✅ 삭제 후 상태 ==="
+          echo "=== 삭제 후 상태 ==="
           REMAINING=$(aws autoscaling describe-scheduled-actions \
             --auto-scaling-group-name test-pipeline-asg \
             --query 'ScheduledUpdateGroupActions' \

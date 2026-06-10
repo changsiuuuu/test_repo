@@ -14,20 +14,16 @@ concurrency:
 
 jobs:
   restart_db:
-    runs-on: self-hosted # self-hosted 대신 GitHub 런너 사용 가능 (AWS CLI 내장)
-    # 만약 self-hosted 런너에 AWS 권한이 이미 있다면 self-hosted 유지
-    # permissions 추가하여 GitHub OIDC를 통해 AWS 인증을 할 수도 있으나 
-    # 현재 설정에 AWS 액세스 키가 환경변수로 있거나 self-hosted의 IAM Role을 쓴다고 가정
+    runs-on: ubuntu-latest
 
     steps:
       - name: Log Restart Context
         run: |
-          echo "🔄 DB 재시작 트리거됨"
+          echo "DB 재시작 트리거됨"
           echo "  사유: ${{ github.event.inputs.reason }}"
           echo "  실행자: ${{ github.actor }}"
 
-      # AWS 인증 단계 (기존 인프라 배포와 동일한 인증 방식 적용 필요)
-      # self-hosted 런너가 이미 IAM Role을 가지고 있다면 이 단계는 생략 가능
+      # AWS Credentials 설정 (self-hosted runner에 IAM Role이 부여된 경우 생략 가능)
       # - name: Configure AWS Credentials
       #   uses: aws-actions/configure-aws-credentials@v4
       #   with:
@@ -52,7 +48,7 @@ jobs:
             --command-id "$COMMAND_ID" \
             --instance-id $(aws ec2 describe-instances --filters "Name=tag:Purpose,Values=db" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text)
             
-          echo "✅ DB 컨테이너 재시작 완료"
+          echo "DB 컨테이너 재시작 완료"
 
       - name: Send Notification
         if: always()
@@ -61,7 +57,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            🔄 [DB 재시작 결과]
+            [DB 재시작 결과]
             - 결과: ${{ job.status }}
             - 사유: ${{ github.event.inputs.reason }}
             - 실행자: ${{ github.actor }}

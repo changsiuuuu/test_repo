@@ -24,11 +24,11 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Initialize Terraform
-        working-directory: terraform        # ← 수정
+        working-directory: terraform
         run: terraform init
 
       - name: Apply Scaling Changes
-        working-directory: terraform        # ← 수정
+        working-directory: terraform
         run: |
           terraform apply \
             -auto-approve \

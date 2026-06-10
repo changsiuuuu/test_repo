@@ -72,40 +72,36 @@ jobs:
           infracost breakdown --path plan.json --format table --out-file infracost-report.txt
           cat infracost-report.txt
 
-      # 기존 "Generate Telegram Message" step 통째로 교체
-
       - name: Generate Telegram Message
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         run: |
             cat > telegram-message.md <<EOF
-            🏗️ [인프라 사전 검증 리포트]
+            [인프라 사전 검증 리포트]
             
-            💰 [예상 월 비용]
+            [예상 월 비용]
             EOF
             
             grep -E "OVERALL TOTAL|Total Monthly" terraform/infracost-report.txt | head -3 >> telegram-message.md || echo "(비용 정보 없음)" >> telegram-message.md
             
             cat >> telegram-message.md <<EOF
             
-            🔒 [보안 스캔 결과]
+            [보안 스캔 결과]
             EOF
             
             CRITICAL=$(grep -c "CRITICAL:" trivy-report.txt 2>/dev/null || echo 0)
             HIGH=$(grep -c "HIGH:" trivy-report.txt 2>/dev/null || echo 0)
             MEDIUM=$(grep -c "MEDIUM:" trivy-report.txt 2>/dev/null || echo 0)
             
-            echo "- 🔴 CRITICAL: $CRITICAL" >> telegram-message.md
-            echo "- 🟠 HIGH: $HIGH" >> telegram-message.md
-            echo "- 🟡 MEDIUM: $MEDIUM" >> telegram-message.md
+            echo "- CRITICAL: $CRITICAL" >> telegram-message.md
+            echo "- HIGH: $HIGH" >> telegram-message.md
+            echo "- MEDIUM: $MEDIUM" >> telegram-message.md
             
             echo "" >> telegram-message.md
-            echo "📋 상세: GitHub Actions 로그 참조" >> telegram-message.md
-            echo "🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> telegram-message.md
+            echo "상세: GitHub Actions 로그 참조" >> telegram-message.md
+            echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> telegram-message.md
             
             echo "=== 생성된 메시지 ==="
             cat telegram-message.md
-
-# 그 아래 Send Telegram Notification은 그대로
 
       - name: Send Telegram Notification
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
@@ -163,7 +159,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ✅ 수동 인프라 배포(Terraform Apply) 작업이 정상적으로 완료되었습니다.
+            수동 인프라 배포(Terraform Apply) 작업이 정상적으로 완료되었습니다.
             실행자: ${{ github.actor }}
 
       - name: Send Apply Failure Notification
@@ -173,6 +169,6 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ❌ 수동 인프라 배포(Terraform Apply) 실패
+            수동 인프라 배포(Terraform Apply) 실패
             실행자: ${{ github.actor }}
             GitHub Actions 로그를 확인하십시오.
