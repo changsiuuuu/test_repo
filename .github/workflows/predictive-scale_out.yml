@@ -1,0 +1,131 @@
+name: "Predictive Scale out"
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "스케일링 단계 (1, 2, 3)"
+        required: true
+        type: choice
+        options: ['1', '2', '3']
+        default: '1'
+      
+      metric_type:
+        description: "트리거 메트릭"
+        required: true
+        type: choice
+        options: ['cpu', 'memory', 'disk']
+        default: 'cpu'
+      
+      metric_value:
+        description: "측정된 메트릭 값 (%)"
+        required: false
+        default: "0"
+      
+      alert_name:
+        description: "알람 이름"
+        required: false
+        default: "PredictedHighLoad"
+
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+jobs:
+  predictive_scale:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    
+    steps:
+      - name: Calculate Capacity
+        id: calc
+        run: |
+          STAGE="${{ github.event.inputs.stage }}"
+          
+          case $STAGE in
+            1)
+              CAPACITY=2
+              ;;
+            2)
+              CAPACITY=4
+              ;;
+            3)
+              CAPACITY=7
+              ;;
+            *)
+              echo "::error::잘못된 단계가 입력되었습니다: $STAGE"
+              exit 1
+              ;;
+          esac
+          
+          echo "capacity=$CAPACITY" >> $GITHUB_OUTPUT
+          
+          echo "예측 스케일 아웃 시작"
+          echo "단계: $STAGE"
+          echo "메트릭: ${{ github.event.inputs.metric_type }} = ${{ github.event.inputs.metric_value }}%"
+          echo "목표 용량: $CAPACITY"
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: terraform init
+
+      - name: Check Current Capacity
+        id: current
+        run: |
+          CURRENT=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names test-pipeline-asg \
+            --query 'AutoScalingGroups[0].DesiredCapacity' \
+            --output text)
+          
+          TARGET=${{ steps.calc.outputs.capacity }}
+          
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+          echo "현재 용량: $CURRENT -> 목표 용량: $TARGET"
+          
+          if [ "$CURRENT" -ge "$TARGET" ]; then
+            echo "::warning::현재 용량이 목표치 이상입니다. 스케일 아웃을 건너뜁니다."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Scale Out
+        if: steps.current.outputs.skip == 'false'
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="desired_capacity=${{ steps.calc.outputs.capacity }}"
+          
+          echo "스케일 아웃 완료. 현재 용량: ${{ steps.calc.outputs.capacity }}"
+
+      - name: Send Scale Out Notification
+        if: steps.current.outputs.skip == 'false'
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            [예측 스케일 아웃 실행]
+            - 단계: ${{ github.event.inputs.stage }}
+            - 트리거: ${{ github.event.inputs.metric_type }} = ${{ github.event.inputs.metric_value }}%
+            - 용량 변경: ${{ steps.current.outputs.current }} -> ${{ steps.calc.outputs.capacity }}대
+
+      - name: Send Final Notification
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            [예측 스케일 아웃 종료]
+            - 실행 결과: ${{ job.status }}
+            - 실행 단계: ${{ github.event.inputs.stage }}
+            - 발생 메트릭: ${{ github.event.inputs.metric_type }} = ${{ github.event.inputs.metric_value }}%
+            - 최종 목표 용량: ${{ steps.calc.outputs.capacity || '확인 불가' }}대
+

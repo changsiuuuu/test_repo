@@ -1,0 +1,102 @@
+name: "Predictive Scale-In"
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "스케일 인 사유"
+        required: false
+        default: "트래픽 안정화 확인"
+      
+      metric_type:
+        description: "안정화 확인 메트릭"
+        required: false
+        type: choice
+        options: ['cpu', 'memory', 'disk']
+        default: 'cpu'
+
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+jobs:
+  predictive_scale_in:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: terraform init
+
+      - name: Determine Scale-In Target
+        id: calc
+        run: |
+          CURRENT=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names test-pipeline-asg \
+            --query 'AutoScalingGroups[0].DesiredCapacity' \
+            --output text)
+          
+          if [ -z "$CURRENT" ] || [ "$CURRENT" == "None" ]; then
+            echo "::error::현재 용량을 확인할 수 없습니다."
+            exit 1
+          fi
+          
+          echo "현재 용량: $CURRENT 대"
+          SKIP="false"
+          
+          # 한 단계씩만 아래로 낮춤 (7 -> 4 -> 2 -> 1)
+          if [ "$CURRENT" -ge 7 ]; then
+            TARGET=4
+          elif [ "$CURRENT" -ge 4 ]; then
+            TARGET=2
+          elif [ "$CURRENT" -ge 2 ]; then
+            TARGET=1
+          else
+            TARGET=1
+            SKIP="true"
+            echo "::warning::현재 용량이 이미 최소 상태(1대)입니다. 스케일 인을 건너뜁니다."
+          fi
+          
+          echo "목표 용량: $TARGET 대"
+          
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "skip=$SKIP" >> $GITHUB_OUTPUT
+
+      - name: Scale In
+        if: steps.calc.outputs.skip == 'false'
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="desired_capacity=${{ steps.calc.outputs.target }}"
+          
+          echo "스케일 인 완료. 현재 용량: ${{ steps.calc.outputs.target }}"
+
+      - name: Send Scale In Notification
+        if: steps.current.outputs.skip == 'false'
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            [안전 스케일 인 실행]
+            - 사유: ${{ github.event.inputs.reason }}
+            - 용량 변경: ${{ steps.calc.outputs.current }} -> ${{ steps.calc.outputs.target }}대
+
+      - name: Send Final Notification
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            [스케일 인 파이프라인 종료]
+            - 실행 결과: ${{ job.status }}
+            - 최종 목표 용량: ${{ steps.calc.outputs.target || steps.calc.outputs.current }}대
